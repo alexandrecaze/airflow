@@ -43,8 +43,10 @@ from flask_appbuilder.actions import action
 from flask_appbuilder.models.sqla.filters import BaseFilter
 from flask_babel import lazy_gettext
 from jinja2.utils import htmlsafe_json_dumps  # type: ignore
-from pygments import highlight, lexers
-from pygments.formatters import HtmlFormatter
+from pygments import highlight
+from pygments.formatters.html import HtmlFormatter
+from pygments.lexers.configs import IniLexer
+from pygments.lexers.python import PythonLexer
 from sqlalchemy import and_, desc, func, or_, union_all
 from sqlalchemy.orm import joinedload
 from wtforms import SelectField, validators
@@ -90,14 +92,14 @@ else:
     dagbag = models.DagBag(os.devnull, include_examples=False)
 
 
-def get_date_time_num_runs_dag_runs_form_data(request, session, dag):
-    dttm = request.args.get('execution_date')
+def get_date_time_num_runs_dag_runs_form_data(req, session, dag):
+    dttm = req.args.get('execution_date')
     if dttm:
         dttm = timezone.parse(dttm)
     else:
         dttm = dag.get_latest_execution_date(session=session) or timezone.utcnow()
 
-    base_date = request.args.get('base_date')
+    base_date = req.args.get('base_date')
     if base_date:
         base_date = timezone.parse(base_date)
     else:
@@ -106,7 +108,7 @@ def get_date_time_num_runs_dag_runs_form_data(request, session, dag):
         base_date = (dttm + timedelta(seconds=1)).replace(microsecond=0)
 
     default_dag_run = conf.getint('webserver', 'default_dag_run_display_number')
-    num_runs = request.args.get('num_runs')
+    num_runs = req.args.get('num_runs')
     num_runs = int(num_runs) if num_runs else default_dag_run
 
     DR = models.DagRun
@@ -146,7 +148,7 @@ def get_date_time_num_runs_dag_runs_form_data(request, session, dag):
 #                                    Error handlers
 ######################################################################################
 
-def circles(error):
+def circles():
     return render_template(
         'airflow/circles.html', hostname=socket.getfqdn() if conf.getboolean(
             'webserver',
@@ -154,7 +156,7 @@ def circles(error):
             fallback=True) else 'redact'), 404
 
 
-def show_traceback(error):
+def show_traceback():
     from airflow.utils import asciiart as ascii_
     return render_template(
         'airflow/traceback.html',
@@ -313,9 +315,9 @@ class Airflow(AirflowBaseView):
 
             import_errors = session.query(errors.ImportError).all()
 
-        for ie in import_errors:
+        for import_error in import_errors:
             flash(
-                "Broken DAG: [{ie.filename}] {ie.stacktrace}".format(ie=ie),
+                "Broken DAG: [{ie.filename}] {ie.stacktrace}".format(ie=import_error),
                 "dag_import_error")
 
         from airflow.plugins_manager import import_errors as plugin_import_errors
@@ -407,7 +409,6 @@ class Airflow(AirflowBaseView):
     @provide_session
     def task_stats(self, session=None):
         TI = models.TaskInstance
-        DagRun = models.DagRun
         Dag = models.DagModel
 
         allowed_dag_ids = set(appbuilder.sm.get_accessible_dag_ids())
@@ -506,8 +507,6 @@ class Airflow(AirflowBaseView):
     @has_access
     @provide_session
     def last_dagruns(self, session=None):
-        DagRun = models.DagRun
-
         allowed_dag_ids = appbuilder.sm.get_accessible_dag_ids()
 
         if 'all_dags' in allowed_dag_ids:
@@ -553,7 +552,7 @@ class Airflow(AirflowBaseView):
             dag_orm = DagModel.get_dagmodel(dag_id, session=session)
             code = DagCode.get_code_by_fileloc(dag_orm.fileloc)
             html_code = highlight(
-                code, lexers.PythonLexer(), HtmlFormatter(linenos=True))
+                code, PythonLexer(), HtmlFormatter(linenos=True))
 
         except Exception as e:
             all_errors += (
@@ -604,7 +603,7 @@ class Airflow(AirflowBaseView):
     @has_access
     @action_logging
     @provide_session
-    def rendered(self, session=None):
+    def rendered(self):
         dag_id = request.args.get('dag_id')
         task_id = request.args.get('task_id')
         execution_date = request.args.get('execution_date')
@@ -621,7 +620,7 @@ class Airflow(AirflowBaseView):
             ti.get_rendered_template_fields()
         except AirflowException as e:
             msg = "Error rendering template: " + escape(e)
-            if e.__cause__:
+            if e.__cause__ is not None:
                 msg += Markup("<br/><br/>OriginalError: ") + escape(e.__cause__)
             flash(msg, "error")
         except Exception as e:
@@ -779,7 +778,7 @@ class Airflow(AirflowBaseView):
     @has_access
     @action_logging
     @provide_session
-    def elasticsearch(self, session=None):
+    def elasticsearch(self):
         dag_id = request.args.get('dag_id')
         task_id = request.args.get('task_id')
         execution_date = request.args.get('execution_date')
@@ -2146,7 +2145,7 @@ class ConfigurationView(AirflowBaseView):
         else:
             code_html = Markup(highlight(
                 config,
-                lexers.IniLexer(),  # Lexer call
+                IniLexer(),  # Lexer call
                 HtmlFormatter(noclasses=True))
             )
             return self.render_template(

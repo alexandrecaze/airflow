@@ -36,6 +36,5 @@
 ./airflow/www/static_config.py
 ./airflow/www/utils.py
 ./airflow/www/validators.py
-./airflow/www/views.py
 ./airflow/www/widgets.py
 ./scripts/perf/scheduler_ops_metrics.py
